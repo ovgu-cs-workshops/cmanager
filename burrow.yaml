@@ -1,0 +1,23 @@
+name: cmanager
+version: 0.1.0
+description: Container Manager for the users
+authors:
+- Martin Koppehel
+license: BSD-3-Clause
+package:
+  include: []
+args:
+  run: ""
+  go:
+    test: ""
+    build: -ldflags '-linkmode=external "-extldflags=-static"'
+    doc: ""
+    vet: ""
+    fmt: ""
+  glide:
+    install: ""
+    update: ""
+    get: ""
+  git:
+    tag: -s -m 'Update version'
+    clone: ""
