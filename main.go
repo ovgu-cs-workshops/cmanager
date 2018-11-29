@@ -170,9 +170,6 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 				os.Getenv("USER_INTERNAL_NETWORK"): &network.EndpointSettings{},
 			},
 		}
-		if useNetwork {
-			networkConfig.EndpointsConfig[os.Getenv("USER_NETWORK")] = &network.EndpointSettings{}
-		}
 
 		resp, err := dockerClient.ContainerCreate(dockerctx.Background(), &container.Config{
 			Image: os.Getenv("USER_IMAGE"),
@@ -195,11 +192,15 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 			return service.ReturnError("rocks.git.internal-error")
 		}
 		util.Log.Debugf("Started container with ID %v", resp.ID[:16])
+		if useNetwork {
+			if err := dockerClient.NetworkConnect(dockerctx.Background(), os.Getenv("USER_NETWORK"), resp.ID, &network.EndpointSettings{}); err != nil {
+				util.Log.Warningf("Failed to attach container to public network")
+			}
+		}
 		user = &containerInfo{
 			ticket:      ticket,
 			containerID: instanceID,
 		}
-
 		users[authid] = user
 	}
 	if user.ticket != ticket {
