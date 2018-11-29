@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
+	"strconv"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -43,6 +44,7 @@ func randomHex(n int) (string, error) {
 
 var users map[string]*containerInfo
 var dockerClient *dockerclient.Client
+var useNetwork bool
 
 func checkLabels(ctr *types.Container) bool {
 	_, ok := ctr.Labels["git-talk"]
@@ -68,6 +70,15 @@ func main() {
 	})
 	util.Log = app.Logger
 	util.App = app
+
+	if allowNet, ok := os.LookupEnv("USER_ALLOW_NETWORK"); !ok {
+		useNetwork = false
+	} else if val, err := strconv.ParseBool(allowNet); err == nil {
+		useNetwork = val
+	} else {
+		util.Log.Errorf("Failed to parse the value of 'USER_ALLOW_NETWORK': %v", err)
+		os.Exit(service.ExitArgument)
+	}
 
 	users = map[string]*containerInfo{}
 	dc, err := dockerclient.NewEnvClient()
@@ -144,6 +155,13 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 			return service.ReturnError("rocks.git.internal-error")
 		}
 
+		networkConfig := &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{},
+		}
+		if useNetwork {
+			networkConfig.EndpointsConfig["gittalk"] = &network.EndpointSettings{}
+		}
+
 		resp, err := dockerClient.ContainerCreate(dockerctx.Background(), &container.Config{
 			Image: os.Getenv("USER_IMAGE"),
 			Labels: map[string]string{
@@ -154,11 +172,7 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 			},
 			User: "1000:1000",
 			Env:  append(os.Environ(), "RUNUSER="+authid, "RUNINST="+instanceID), // FIXME
-		}, nil, &network.NetworkingConfig{
-			EndpointsConfig: map[string]*network.EndpointSettings{
-				"gittalk": &network.EndpointSettings{},
-			},
-		}, "")
+		}, nil, networkConfig, "")
 		if err != nil {
 			util.Log.Errorf("Failed to create container: %v", err)
 			return service.ReturnError("rocks.git.internal-error")
