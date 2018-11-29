@@ -187,16 +187,16 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 			return service.ReturnError("rocks.git.internal-error")
 		}
 		util.Log.Debugf("Created docker container with ID %v", resp.ID[:16])
-		if err := dockerClient.ContainerStart(dockerctx.Background(), resp.ID, types.ContainerStartOptions{}); err != nil {
-			util.Log.Errorf("Failed to start container: %v", err)
-			return service.ReturnError("rocks.git.internal-error")
-		}
-		util.Log.Debugf("Started container with ID %v", resp.ID[:16])
 		if useNetwork {
 			if err := dockerClient.NetworkConnect(dockerctx.Background(), os.Getenv("USER_NETWORK"), resp.ID, &network.EndpointSettings{}); err != nil {
 				util.Log.Warningf("Failed to attach container to public network")
 			}
 		}
+		if err := dockerClient.ContainerStart(dockerctx.Background(), resp.ID, types.ContainerStartOptions{}); err != nil {
+			util.Log.Errorf("Failed to start container: %v", err)
+			return service.ReturnError("rocks.git.internal-error")
+		}
+		util.Log.Debugf("Started container with ID %v", resp.ID[:16])
 		user = &containerInfo{
 			ticket:      ticket,
 			containerID: instanceID,
