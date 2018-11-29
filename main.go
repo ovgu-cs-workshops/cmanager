@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -75,8 +76,17 @@ func main() {
 		useNetwork = false
 	} else if val, err := strconv.ParseBool(allowNet); err == nil {
 		useNetwork = val
+		if net, ok := os.LookupEnv("USER_NETWORK"); val && (!ok || len(strings.TrimSpace(net)) == 0) {
+			util.Log.Errorf("This service requires the 'USER_NETWORK' environment variable to be set.")
+			os.Exit(service.ExitArgument)
+		}
 	} else {
 		util.Log.Errorf("Failed to parse the value of 'USER_ALLOW_NETWORK': %v", err)
+		os.Exit(service.ExitArgument)
+	}
+
+	if net, ok := os.LookupEnv("USER_INTERNAL_NETWORK"); !ok || len(strings.TrimSpace(net)) == 0 {
+		util.Log.Errorf("This service requires the 'USER_INTERNAL_NETWORK' environment variable to be set.")
 		os.Exit(service.ExitArgument)
 	}
 
@@ -156,10 +166,12 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 		}
 
 		networkConfig := &network.NetworkingConfig{
-			EndpointsConfig: map[string]*network.EndpointSettings{},
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				os.Getenv("USER_INTERNAL_NETWORK"): &network.EndpointSettings{},
+			},
 		}
 		if useNetwork {
-			networkConfig.EndpointsConfig["gittalk"] = &network.EndpointSettings{}
+			networkConfig.EndpointsConfig[os.Getenv("USER_NETWORK")] = &network.EndpointSettings{}
 		}
 
 		resp, err := dockerClient.ContainerCreate(dockerctx.Background(), &container.Config{
