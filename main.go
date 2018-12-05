@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -180,8 +181,16 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 				"git-talk-inst": instanceID,
 			},
 			User: "1000:1000",
-			Env:  append(os.Environ(), "RUNUSER="+authid, "RUNINST="+instanceID), // FIXME
-		}, nil, networkConfig, "")
+
+			Hostname: fmt.Sprintf("git-%s", authid),
+			Env:      append(os.Environ(), "RUNUSER="+authid, "RUNINST="+instanceID), // FIXME
+		}, &container.HostConfig{
+			AutoRemove: true,
+			Resources: container.Resources{
+				NanoCPUs: 500000000, // 0.5 cpu cores
+				Memory:   536870912, // 512MB
+			},
+		}, networkConfig, "")
 		if err != nil {
 			util.Log.Errorf("Failed to create container: %v", err)
 			return service.ReturnError("rocks.git.internal-error")
