@@ -13,6 +13,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"github.com/ovgu-cs-workshops/cmanager/kubernetes"
+	usersPackage "github.com/ovgu-cs-workshops/cmanager/users"
 	"os"
 	"strconv"
 	"strings"
@@ -24,11 +25,6 @@ import (
 	"github.com/ovgu-cs-workshops/cmanager/util"
 )
 
-type containerInfo struct {
-	ticket      string
-	containerID string
-}
-
 func randomHex(n int) (string, error) {
 	bytes := make([]byte, n)
 	if _, err := rand.Read(bytes); err != nil {
@@ -37,7 +33,7 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(bytes), nil
 }
 
-var users map[string]*containerInfo
+var users usersPackage.ContainerList
 var useNetwork bool
 var kubernetesConnector *kubernetes.KubernetesConnector
 
@@ -69,10 +65,9 @@ func main() {
 		os.Exit(service.ExitArgument)
 	}
 
-	users = map[string]*containerInfo{}
-
 	// Trying to get access to kubernetes cluster
 	kubernetesConnector = kubernetes.New()
+	users = kubernetesConnector.ExistingUsers()
 
 	app.Connect()
 
@@ -122,13 +117,13 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 			return service.ReturnError("rocks.git.internal-error")
 		}
 
-		user = &containerInfo{
-			ticket:      ticket,
-			containerID: instanceID,
+		user = &usersPackage.ContainerInfo{
+			Ticket:      ticket,
+			ContainerID: instanceID,
 		}
 		users[authid] = user
 	}
-	if user.ticket != ticket {
+	if user.Ticket != ticket {
 		return service.ReturnError("rocks.git.invalid-password")
 	}
 
@@ -143,6 +138,6 @@ func getRoles(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.InvokeR
 	}
 	return service.ReturnValue(wamp.Dict{
 		"authroles":   wamp.List{"user"},
-		"containerid": user.containerID,
+		"containerid": user.ContainerID,
 	})
 }

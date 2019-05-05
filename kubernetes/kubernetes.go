@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"github.com/ovgu-cs-workshops/cmanager/users"
 	"github.com/ovgu-cs-workshops/cmanager/util"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,10 +45,10 @@ func (k *KubernetesConnector) CreatePod(instanceId string, userName string, user
 	podDescription := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "userland-" + instanceId,
-			Labels: map[string]string{
+			Annotations: map[string]string{
 				"git-talk":      "true",
 				"git-talk-user": userName,
-				// "git-talk-pass": userPassword,
+				"git-talk-pass": userPassword,
 				"git-talk-inst": instanceId,
 			},
 		},
@@ -83,14 +84,41 @@ func (k *KubernetesConnector) CreatePod(instanceId string, userName string, user
 
 }
 
-func (k *KubernetesConnector) ExistingPods() {
+func (k *KubernetesConnector) ExistingUsers() users.ContainerList {
 
 	listOptions := metav1.ListOptions{}
+	util.Log.Info("Checking for existing pods")
 
 	podList, _ := k.clientInstance.CoreV1().Pods("cmanager").List(listOptions)
 
+	containerInfo := make(users.ContainerList)
+
 	for _, pod := range podList.Items {
-		util.Log.Infof("Name: %v, Labels: %v", pod.Name, pod.Labels)
+
+		if pod.Annotations["git-talk"] != "true" {
+			continue
+		}
+
+		uName, nameOk := pod.Annotations["git-talk-user"]
+		uPass, passOk := pod.Annotations["git-talk-pass"]
+		uInst, instOk := pod.Annotations["git-talk-inst"]
+
+		if !nameOk || !passOk || !instOk {
+			util.Log.Warningf("Corrupt Pod Annotations")
+
+		}
+
+		containerInfo[uName] = &users.ContainerInfo{
+			Ticket:
+			uPass,
+			ContainerID: uInst,
+		}
+
+		util.Log.Infof("%v", pod.Annotations)
+		util.Log.Infof("Found existing pod %v for user %v", uInst, uName)
+
 	}
+
+	return containerInfo
 
 }
