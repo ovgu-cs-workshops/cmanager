@@ -60,11 +60,6 @@ func main() {
 		os.Exit(service.ExitArgument)
 	}
 
-	if net, ok := os.LookupEnv("USER_INTERNAL_NETWORK"); !ok || len(strings.TrimSpace(net)) == 0 {
-		util.Log.Errorf("This service requires the 'USER_INTERNAL_NETWORK' environment variable to be set.")
-		os.Exit(service.ExitArgument)
-	}
-
 	// Trying to get access to kubernetes cluster
 	kubernetesConnector = kubernetes.New()
 	users = kubernetesConnector.ExistingUsers()

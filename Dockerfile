@@ -1,15 +1,21 @@
-FROM embeddedenterprises/burrow as builder
-RUN apk update && apk add build-base
-RUN burrow clone https://github.com/ovgu-cs-workshops/cmanager.git
-WORKDIR $GOPATH/src/github.com/ovgu-cs-workshops/cmanager
-RUN burrow e && burrow b
-RUN cp bin/cmanager /bin
+# build stage
+FROM golang:1.12 as go
 
+ENV GO111MODULE=on
+
+WORKDIR /cmanager
+
+COPY go.mod .
+COPY go.sum .
+
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build
+
+# final stage
 FROM scratch
-LABEL service "cmanager"
-LABEL vendor "ovgu-cs-workshops"
-LABEL maintainers "Martin Koppehel <mkoppehel@embedded.enterprises>"
+COPY --from=go /cmanager/cmanager /bin/cmanager
 
-COPY --from=builder /bin/cmanager /bin/cmanager
 ENTRYPOINT ["/bin/cmanager"]
-CMD []
