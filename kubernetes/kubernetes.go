@@ -6,6 +6,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"os"
 )
@@ -17,17 +18,28 @@ type KubernetesConnector struct {
 func New() *KubernetesConnector {
 
 	kubeConfig, ok := os.LookupEnv("KUBECONFIG")
+	var clusterConfiguration *rest.Config
+	var err error
+
 	if !ok {
-		util.Log.Errorf("Failed to read KUBECONFIG")
-		os.Exit(1)
+		util.Log.Info("KUBECONFIG was not found in environment. Performing In-Cluster-Authentication..")
+
+		clusterConfiguration, err = rest.InClusterConfig()
+		if err != nil {
+			panic(err.Error())
+		}
+
+	} else {
+		util.Log.Info("KUBECONFIG was found in environment. Performing External-Cluster-Authentication..")
+
+		clusterConfiguration, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
+		if err != nil {
+			panic(err.Error())
+		}
+
 	}
 
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfig)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	clientInstance, err := kubernetes.NewForConfig(config)
+	clientInstance, err := kubernetes.NewForConfig(clusterConfiguration)
 	if err != nil {
 		panic(err.Error())
 	}
