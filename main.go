@@ -12,17 +12,10 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"encoding/hex"
-	"fmt"
-	"io"
+	"github.com/ovgu-cs-workshops/cmanager/kubernetes"
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	dockerclient "github.com/docker/docker/client"
-	dockerctx "golang.org/x/net/context"
 
 	"github.com/EmbeddedEnterprises/service"
 	"github.com/gammazero/nexus/client"
@@ -45,23 +38,8 @@ func randomHex(n int) (string, error) {
 }
 
 var users map[string]*containerInfo
-var dockerClient *dockerclient.Client
 var useNetwork bool
-
-func checkLabels(ctr *types.Container) bool {
-	_, ok := ctr.Labels["git-talk"]
-	return ok
-}
-
-func ensureImagePulled() {
-	out, err := dockerClient.ImagePull(dockerctx.Background(), os.Getenv("USER_IMAGE"), types.ImagePullOptions{})
-	if err != nil {
-		util.Log.Criticalf("Failed to pull image: %v", err)
-		os.Exit(2)
-	}
-	defer out.Close()
-	io.Copy(os.Stderr, out)
-}
+var kubernetesConnector *kubernetes.KubernetesConnector
 
 func main() {
 	app := service.New(service.Config{
@@ -92,37 +70,9 @@ func main() {
 	}
 
 	users = map[string]*containerInfo{}
-	dc, err := dockerclient.NewEnvClient()
-	if err != nil {
-		util.Log.Criticalf("Failed to connect to the docker daemon: %v", err)
-		os.Exit(1)
-	}
-	dockerClient = dc
-	ensureImagePulled()
-	containers, err := dockerClient.ContainerList(dockerctx.Background(), types.ContainerListOptions{})
-	if err != nil {
-		util.Log.Warningf("Failed to read containers: %v", err)
-	} else {
-		for idx := range containers {
-			ctr := &containers[idx]
-			if !checkLabels(ctr) {
-				continue
-			}
-			util.Log.Infof("Found container %s", ctr.ID[:16])
-			username, uok := ctr.Labels["git-talk-user"]
-			password, pok := ctr.Labels["git-talk-pass"]
-			instance, iok := ctr.Labels["git-talk-inst"]
-			if !uok || !pok || !iok {
-				util.Log.Warningf("Failed to read user or pass, this should not happen!")
-				continue
-			}
-			util.Log.Infof("Found instance %v for user %v", instance, username)
-			users[username] = &containerInfo{
-				ticket:      password,
-				containerID: instance,
-			}
-		}
-	}
+
+	// Trying to get access to kubernetes cluster
+	kubernetesConnector = kubernetes.New()
 
 	app.Connect()
 
@@ -161,51 +111,17 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 	ticket = hex.EncodeToString(hashBytes[:])
 	user, ok := users[authid]
 	if !ok {
-		instanceID, err := randomHex(16)
+		instanceID, err := randomHex(4)
 		if err != nil {
 			return service.ReturnError("rocks.git.internal-error")
 		}
 
-		networkConfig := &network.NetworkingConfig{
-			EndpointsConfig: map[string]*network.EndpointSettings{
-				os.Getenv("USER_INTERNAL_NETWORK"): &network.EndpointSettings{},
-			},
-		}
-
-		resp, err := dockerClient.ContainerCreate(dockerctx.Background(), &container.Config{
-			Image: os.Getenv("USER_IMAGE"),
-			Labels: map[string]string{
-				"git-talk":      "yes",
-				"git-talk-user": authid,
-				"git-talk-pass": ticket,
-				"git-talk-inst": instanceID,
-			},
-			User: "1000:1000",
-
-			Hostname: fmt.Sprintf("git-%s", authid),
-			Env:      append(os.Environ(), "RUNUSER="+authid, "RUNINST="+instanceID), // FIXME
-		}, &container.HostConfig{
-			AutoRemove: true,
-			Resources: container.Resources{
-				NanoCPUs: 500000000, // 0.5 cpu cores
-				Memory:   536870912, // 512MB
-			},
-		}, networkConfig, "")
+		_, err = kubernetesConnector.CreatePod(instanceID, authid, ticket, os.Getenv("USER_IMAGE"))
 		if err != nil {
-			util.Log.Errorf("Failed to create container: %v", err)
+			util.Log.Errorf("Failed to create pod: %v", err)
 			return service.ReturnError("rocks.git.internal-error")
 		}
-		util.Log.Debugf("Created docker container with ID %v", resp.ID[:16])
-		if useNetwork {
-			if err := dockerClient.NetworkConnect(dockerctx.Background(), os.Getenv("USER_NETWORK"), resp.ID, &network.EndpointSettings{}); err != nil {
-				util.Log.Warningf("Failed to attach container to public network")
-			}
-		}
-		if err := dockerClient.ContainerStart(dockerctx.Background(), resp.ID, types.ContainerStartOptions{}); err != nil {
-			util.Log.Errorf("Failed to start container: %v", err)
-			return service.ReturnError("rocks.git.internal-error")
-		}
-		util.Log.Debugf("Started container with ID %v", resp.ID[:16])
+
 		user = &containerInfo{
 			ticket:      ticket,
 			containerID: instanceID,
