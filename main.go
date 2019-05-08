@@ -42,6 +42,7 @@ var kubernetesConnector *kubernetes.KubernetesConnector
 var pendingInstances map[string]chan struct{}
 
 func main() {
+	pendingInstances = make(map[string]chan struct{})
 	app := service.New(service.Config{
 		Name:          "cmanager",
 		Serialization: client.MSGPACK,
