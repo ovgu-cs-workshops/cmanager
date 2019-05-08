@@ -57,8 +57,8 @@ func New() *KubernetesConnector {
 
 func (k *KubernetesConnector) CreatePod(instanceId string, userName string, userPassword string, imageName string) (*v1.Pod, error) {
 
-	volumeMode := v1.PersistentVolumeFilesystem
-	storageClass := "ssd-storage"
+	podNamespace := os.Getenv("POD_NAMESPACE")
+	storageClass := os.Getenv("POD_STORAGE_CLASS")
 
 	pvDescription := v1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -72,12 +72,9 @@ func (k *KubernetesConnector) CreatePod(instanceId string, userName string, user
 					v1.ResourceName(v1.ResourceStorage): resource.MustParse("100Mi"),
 				},
 			},
-			VolumeName: "userland-" + instanceId + "-home",
-			VolumeMode: &volumeMode,
 		},
 	}
 
-	podNamespace := os.Getenv("POD_NAMESPACE")
 
 	_, err := k.clientInstance.CoreV1().PersistentVolumeClaims(podNamespace).Create(&pvDescription)
 
