@@ -12,11 +12,14 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"encoding/hex"
-	"github.com/ovgu-cs-workshops/cmanager/kubernetes"
-	usersPackage "github.com/ovgu-cs-workshops/cmanager/users"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/ovgu-cs-workshops/cmanager/kubernetes"
+	usersPackage "github.com/ovgu-cs-workshops/cmanager/users"
 
 	"github.com/EmbeddedEnterprises/service"
 	"github.com/gammazero/nexus/client"
@@ -36,6 +39,7 @@ func randomHex(n int) (string, error) {
 var users usersPackage.ContainerList
 var useNetwork bool
 var kubernetesConnector *kubernetes.KubernetesConnector
+var pendingInstances map[string]chan struct{}
 
 func main() {
 	app := service.New(service.Config{
@@ -50,7 +54,6 @@ func main() {
 	if allowNet, ok := os.LookupEnv("USER_ALLOW_NETWORK"); !ok {
 		useNetwork = false
 	} else if val, err := strconv.ParseBool(allowNet); err == nil {
-		useNetwork = val
 		if net, ok := os.LookupEnv("USER_NETWORK"); val && (!ok || len(strings.TrimSpace(net)) == 0) {
 			util.Log.Errorf("This service requires the 'USER_NETWORK' environment variable to be set.")
 			os.Exit(service.ExitArgument)
@@ -82,9 +85,43 @@ func main() {
 		os.Exit(service.ExitRegistration)
 	}
 
+	if err := app.Client.Subscribe("wamp.registration.on_create", handleRegistration, nil); err != nil {
+		util.Log.Errorf("Failed to subscribe to procedure registration: %s", err)
+		os.Exit(service.ExitRegistration)
+	}
+
 	app.Run()
 
 	os.Exit(service.ExitSuccess)
+}
+
+func handleRegistration(args wamp.List, _, _ wamp.Dict) {
+	if len(args) < 2 {
+		return
+	}
+	wid, ok := wamp.AsDict(args[1])
+	if !ok {
+		return
+	}
+	proc := wamp.OptionString(wid, "uri")
+	if c, ok := pendingInstances[proc]; ok {
+		close(c)
+		delete(pendingInstances, proc)
+	}
+}
+
+func waitForReadyPod(instance string, timeout time.Duration) error {
+	readyChan := make(chan struct{})
+	procedureName := fmt.Sprintf("rocks.git.tui.%s.create", instance)
+	pendingInstances[procedureName] = readyChan
+	select {
+	case <-readyChan:
+		return nil
+	case <-time.After(timeout):
+		delete(pendingInstances, procedureName)
+		close(readyChan)
+		return fmt.Errorf("Timeout waiting for instance %s", instance)
+	}
 }
 
 func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.InvokeResult {
@@ -111,6 +148,14 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 			util.Log.Errorf("Failed to create pod: %v", err)
 			return service.ReturnError("rocks.git.internal-error")
 		}
+
+		if err := waitForReadyPod(instanceID, 60*time.Second); err != nil {
+			util.Log.Errorf("Failed to wait for pod to become ready: %v", err)
+			return service.ReturnError("rocks.git.internal-error")
+		}
+
+		// Give the pod some time to settle down, initializing etc.
+		time.Sleep(500 * time.Millisecond)
 
 		user = &usersPackage.ContainerInfo{
 			Ticket:      ticket,

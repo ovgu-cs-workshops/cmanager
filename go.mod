@@ -6,6 +6,7 @@ require (
 	github.com/Azure/go-autorest v11.1.2+incompatible // indirect
 	github.com/EmbeddedEnterprises/service v0.17.3
 	github.com/Microsoft/go-winio v0.4.12
+	github.com/containerd/continuity v0.0.0-20190426062206-aaeac12a7ffc // indirect
 	github.com/dgrijalva/jwt-go v0.0.0-20160705203006-01aeca54ebda // indirect
 	github.com/docker/distribution v2.7.1+incompatible
 	github.com/docker/docker v0.0.0-20181113085551-758255791e25
@@ -18,6 +19,7 @@ require (
 	github.com/gogo/protobuf v1.2.1
 	github.com/golang/groupcache v0.0.0-20160516000752-02826c3e7903 // indirect
 	github.com/google/btree v0.0.0-20160524151835-7d79101e329e // indirect
+	github.com/google/go-cmp v0.3.0 // indirect
 	github.com/google/gofuzz v0.0.0-20170612174753-24818f796faf // indirect
 	github.com/google/uuid v1.0.0 // indirect
 	github.com/googleapis/gnostic v0.0.0-20170729233727-0c5108395e2d // indirect
@@ -39,9 +41,8 @@ require (
 	github.com/opencontainers/image-spec v0.0.0-20181029102219-09950c5fb1bb
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pkg/errors v0.8.1
-	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/sirupsen/logrus v1.4.1 // indirect
 	github.com/spf13/pflag v1.0.1 // indirect
-	github.com/stretchr/testify v1.2.2 // indirect
 	github.com/ugorji/go v1.1.4
 	golang.org/x/crypto v0.0.0-20190426145343-a29dc8fdc734
 	golang.org/x/net v0.0.0-20190503192946-f4e77d36d62c
@@ -52,6 +53,7 @@ require (
 	golang.org/x/tools v0.0.0-20190503185657-3b6f9c0030f7 // indirect
 	google.golang.org/appengine v1.5.0 // indirect
 	gopkg.in/inf.v0 v0.9.0 // indirect
+	gotest.tools v2.2.0+incompatible // indirect
 	k8s.io/api v0.0.0-20190313235455-40a48860b5ab
 	k8s.io/apimachinery v0.0.0-20190313205120-d7deff9243b1
 	k8s.io/client-go v11.0.0+incompatible

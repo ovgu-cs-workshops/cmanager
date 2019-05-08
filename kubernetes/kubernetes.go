@@ -1,6 +1,8 @@
 package kubernetes
 
 import (
+	"os"
+
 	"github.com/ovgu-cs-workshops/cmanager/users"
 	"github.com/ovgu-cs-workshops/cmanager/util"
 	v1 "k8s.io/api/core/v1"
@@ -9,7 +11,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"os"
 )
 
 type KubernetesConnector struct {
@@ -57,13 +58,14 @@ func New() *KubernetesConnector {
 func (k *KubernetesConnector) CreatePod(instanceId string, userName string, userPassword string, imageName string) (*v1.Pod, error) {
 
 	volumeMode := v1.PersistentVolumeFilesystem
+	storageClass := "ssd-storage"
 
 	pvDescription := v1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "userland-" + instanceId + "-home",
 		},
 		Spec: v1.PersistentVolumeClaimSpec{
-			StorageClassName: "ssd-storage",
+			StorageClassName: &storageClass,
 			AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
 			Resources: v1.ResourceRequirements{
 				Requests: v1.ResourceList{
@@ -168,8 +170,7 @@ func (k *KubernetesConnector) ExistingUsers() users.ContainerList {
 		}
 
 		containerInfo[uName] = &users.ContainerInfo{
-			Ticket:
-			uPass,
+			Ticket:      uPass,
 			ContainerID: uInst,
 		}
 
