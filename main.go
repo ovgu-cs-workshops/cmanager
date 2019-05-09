@@ -9,17 +9,16 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ovgu-cs-workshops/cmanager/kubernetes"
-	usersPackage "github.com/ovgu-cs-workshops/cmanager/users"
 
 	"github.com/EmbeddedEnterprises/service"
 	"github.com/gammazero/nexus/client"
@@ -28,21 +27,11 @@ import (
 	"github.com/ovgu-cs-workshops/cmanager/util"
 )
 
-func randomHex(n int) (string, error) {
-	bytes := make([]byte, n)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-var users usersPackage.ContainerList
 var useNetwork bool
 var kubernetesConnector *kubernetes.KubernetesConnector
-var pendingInstances map[string]chan struct{}
+var readyRexexp = regexp.MustCompile(`rocks\.git\.tui\.(?P<ID>[a-zA-Z0-9]+)\.create`)
 
 func main() {
-	pendingInstances = make(map[string]chan struct{})
 	app := service.New(service.Config{
 		Name:          "cmanager",
 		Serialization: client.MSGPACK,
@@ -66,7 +55,6 @@ func main() {
 
 	// Trying to get access to kubernetes cluster
 	kubernetesConnector = kubernetes.New()
-	users = kubernetesConnector.ExistingUsers()
 
 	app.Connect()
 
@@ -91,8 +79,22 @@ func main() {
 		os.Exit(service.ExitRegistration)
 	}
 
+	stopChan := make(chan struct{})
+	go func() {
+		if err := kubernetesConnector.WatchPVC(stopChan); err != nil {
+			util.Log.Errorf("Failed to watch PVC changes: %v", err)
+			app.Client.Close()
+		}
+	}()
+	go func() {
+		if err := kubernetesConnector.WatchPod(stopChan); err != nil {
+			util.Log.Errorf("Failed to watch Pod changes: %v", err)
+			app.Client.Close()
+		}
+	}()
 	app.Run()
 
+	close(stopChan)
 	os.Exit(service.ExitSuccess)
 }
 
@@ -104,24 +106,15 @@ func handleRegistration(args wamp.List, _, _ wamp.Dict) {
 	if !ok {
 		return
 	}
-	proc := wamp.OptionString(wid, "uri")
-	if c, ok := pendingInstances[proc]; ok {
-		close(c)
-		delete(pendingInstances, proc)
-	}
-}
 
-func waitForReadyPod(instance string, timeout time.Duration) error {
-	readyChan := make(chan struct{})
-	procedureName := fmt.Sprintf("rocks.git.tui.%s.create", instance)
-	pendingInstances[procedureName] = readyChan
-	select {
-	case <-readyChan:
-		return nil
-	case <-time.After(timeout):
-		delete(pendingInstances, procedureName)
-		close(readyChan)
-		return fmt.Errorf("Timeout waiting for instance %s", instance)
+	proc := wamp.OptionString(wid, "uri")
+	if readyRexexp.MatchString(proc) {
+		name := readyRexexp.FindStringSubmatch(proc)[1]
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			// best effort
+			util.App.Client.Publish(fmt.Sprintf("rocks.git.%s.state", name), nil, wamp.List{"ready"}, nil)
+		}()
 	}
 }
 
@@ -137,48 +130,27 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 	}
 	hashBytes := sha512.Sum512([]byte(ticket))
 	ticket = hex.EncodeToString(hashBytes[:])
-	user, ok := users[authid]
-	if !ok {
-		instanceID, err := randomHex(4)
-		if err != nil {
-			return service.ReturnError("rocks.git.internal-error")
-		}
-
-		_, err = kubernetesConnector.CreatePod(instanceID, authid, ticket, os.Getenv("USER_IMAGE"))
-		if err != nil {
-			util.Log.Errorf("Failed to create pod: %v", err)
-			return service.ReturnError("rocks.git.internal-error")
-		}
-
-		if err := waitForReadyPod(instanceID, 60*time.Second); err != nil {
-			util.Log.Errorf("Failed to wait for pod to become ready: %v", err)
-			return service.ReturnError("rocks.git.internal-error")
-		}
-
-		// Give the pod some time to settle down, initializing etc.
-		time.Sleep(500 * time.Millisecond)
-
-		user = &usersPackage.ContainerInfo{
-			Ticket:      ticket,
-			ContainerID: instanceID,
-		}
-		users[authid] = user
+	if _, err := kubernetesConnector.StartEnvironment(authid, ticket, os.Getenv("USER_IMAGE")); err != nil {
+		util.Log.Errorf("Failed to create pod: %v", err)
+		return service.ReturnError("rocks.git.internal-error")
 	}
-	if user.Ticket != ticket {
-		return service.ReturnError("rocks.git.invalid-password")
-	}
-
 	return service.ReturnEmpty()
 }
 
 func getRoles(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.InvokeResult {
 	authid, idok := wamp.AsString(args[1])
-	user, userok := users[authid]
-	if !idok || !userok {
+	if !idok {
 		return service.ReturnError("rocks.git.invalid-argument")
 	}
+
+	_, instance, ready, ok := kubernetesConnector.FindPodForUser(authid, nil)
+	if !ok {
+		return service.ReturnError("rocks.git.not-authorized")
+	}
+
 	return service.ReturnValue(wamp.Dict{
 		"authroles":   wamp.List{"user"},
-		"containerid": user.ContainerID,
+		"containerid": instance,
+		"ready":       ready,
 	})
 }
