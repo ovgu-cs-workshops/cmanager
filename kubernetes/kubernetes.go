@@ -182,6 +182,7 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 	if err != nil {
 		return nil, err
 	}
+	svcToken := false
 
 	podDescription := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -206,6 +207,7 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 					},
 				},
 			},
+			AutomountServiceAccountToken: &svcToken,
 			Containers: []v1.Container{
 				{
 					Name:  "userland-" + instanceId,
