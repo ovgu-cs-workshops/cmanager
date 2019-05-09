@@ -9,20 +9,16 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/network"
-	dockerclient "github.com/docker/docker/client"
-	dockerctx "golang.org/x/net/context"
+	"github.com/ovgu-cs-workshops/cmanager/kubernetes"
 
 	"github.com/EmbeddedEnterprises/service"
 	"github.com/gammazero/nexus/client"
@@ -31,37 +27,9 @@ import (
 	"github.com/ovgu-cs-workshops/cmanager/util"
 )
 
-type containerInfo struct {
-	ticket      string
-	containerID string
-}
-
-func randomHex(n int) (string, error) {
-	bytes := make([]byte, n)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(bytes), nil
-}
-
-var users map[string]*containerInfo
-var dockerClient *dockerclient.Client
 var useNetwork bool
-
-func checkLabels(ctr *types.Container) bool {
-	_, ok := ctr.Labels["git-talk"]
-	return ok
-}
-
-func ensureImagePulled() {
-	out, err := dockerClient.ImagePull(dockerctx.Background(), os.Getenv("USER_IMAGE"), types.ImagePullOptions{})
-	if err != nil {
-		util.Log.Criticalf("Failed to pull image: %v", err)
-		os.Exit(2)
-	}
-	defer out.Close()
-	io.Copy(os.Stderr, out)
-}
+var kubernetesConnector *kubernetes.KubernetesConnector
+var readyRexexp = regexp.MustCompile(`rocks\.git\.tui\.(?P<ID>[a-zA-Z0-9]+)\.create`)
 
 func main() {
 	app := service.New(service.Config{
@@ -76,7 +44,6 @@ func main() {
 	if allowNet, ok := os.LookupEnv("USER_ALLOW_NETWORK"); !ok {
 		useNetwork = false
 	} else if val, err := strconv.ParseBool(allowNet); err == nil {
-		useNetwork = val
 		if net, ok := os.LookupEnv("USER_NETWORK"); val && (!ok || len(strings.TrimSpace(net)) == 0) {
 			util.Log.Errorf("This service requires the 'USER_NETWORK' environment variable to be set.")
 			os.Exit(service.ExitArgument)
@@ -86,43 +53,8 @@ func main() {
 		os.Exit(service.ExitArgument)
 	}
 
-	if net, ok := os.LookupEnv("USER_INTERNAL_NETWORK"); !ok || len(strings.TrimSpace(net)) == 0 {
-		util.Log.Errorf("This service requires the 'USER_INTERNAL_NETWORK' environment variable to be set.")
-		os.Exit(service.ExitArgument)
-	}
-
-	users = map[string]*containerInfo{}
-	dc, err := dockerclient.NewEnvClient()
-	if err != nil {
-		util.Log.Criticalf("Failed to connect to the docker daemon: %v", err)
-		os.Exit(1)
-	}
-	dockerClient = dc
-	ensureImagePulled()
-	containers, err := dockerClient.ContainerList(dockerctx.Background(), types.ContainerListOptions{})
-	if err != nil {
-		util.Log.Warningf("Failed to read containers: %v", err)
-	} else {
-		for idx := range containers {
-			ctr := &containers[idx]
-			if !checkLabels(ctr) {
-				continue
-			}
-			util.Log.Infof("Found container %s", ctr.ID[:16])
-			username, uok := ctr.Labels["git-talk-user"]
-			password, pok := ctr.Labels["git-talk-pass"]
-			instance, iok := ctr.Labels["git-talk-inst"]
-			if !uok || !pok || !iok {
-				util.Log.Warningf("Failed to read user or pass, this should not happen!")
-				continue
-			}
-			util.Log.Infof("Found instance %v for user %v", instance, username)
-			users[username] = &containerInfo{
-				ticket:      password,
-				containerID: instance,
-			}
-		}
-	}
+	// Trying to get access to kubernetes cluster
+	kubernetesConnector = kubernetes.New()
 
 	app.Connect()
 
@@ -142,9 +74,48 @@ func main() {
 		os.Exit(service.ExitRegistration)
 	}
 
+	if err := app.Client.Subscribe("wamp.registration.on_create", handleRegistration, nil); err != nil {
+		util.Log.Errorf("Failed to subscribe to procedure registration: %s", err)
+		os.Exit(service.ExitRegistration)
+	}
+
+	stopChan := make(chan struct{})
+	go func() {
+		if err := kubernetesConnector.WatchPVC(stopChan); err != nil {
+			util.Log.Errorf("Failed to watch PVC changes: %v", err)
+			app.Client.Close()
+		}
+	}()
+	go func() {
+		if err := kubernetesConnector.WatchPod(stopChan); err != nil {
+			util.Log.Errorf("Failed to watch Pod changes: %v", err)
+			app.Client.Close()
+		}
+	}()
 	app.Run()
 
+	close(stopChan)
 	os.Exit(service.ExitSuccess)
+}
+
+func handleRegistration(args wamp.List, _, _ wamp.Dict) {
+	if len(args) < 2 {
+		return
+	}
+	wid, ok := wamp.AsDict(args[1])
+	if !ok {
+		return
+	}
+
+	proc := wamp.OptionString(wid, "uri")
+	if readyRexexp.MatchString(proc) {
+		name := readyRexexp.FindStringSubmatch(proc)[1]
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			// best effort
+			util.App.Client.Publish(fmt.Sprintf("rocks.git.%s.state", name), nil, wamp.List{"ready"}, nil)
+		}()
+	}
 }
 
 func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.InvokeResult {
@@ -159,74 +130,27 @@ func authenticate(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.Inv
 	}
 	hashBytes := sha512.Sum512([]byte(ticket))
 	ticket = hex.EncodeToString(hashBytes[:])
-	user, ok := users[authid]
-	if !ok {
-		instanceID, err := randomHex(16)
-		if err != nil {
-			return service.ReturnError("rocks.git.internal-error")
-		}
-
-		networkConfig := &network.NetworkingConfig{
-			EndpointsConfig: map[string]*network.EndpointSettings{
-				os.Getenv("USER_INTERNAL_NETWORK"): &network.EndpointSettings{},
-			},
-		}
-
-		resp, err := dockerClient.ContainerCreate(dockerctx.Background(), &container.Config{
-			Image: os.Getenv("USER_IMAGE"),
-			Labels: map[string]string{
-				"git-talk":      "yes",
-				"git-talk-user": authid,
-				"git-talk-pass": ticket,
-				"git-talk-inst": instanceID,
-			},
-			User: "1000:1000",
-
-			Hostname: fmt.Sprintf("git-%s", authid),
-			Env:      append(os.Environ(), "RUNUSER="+authid, "RUNINST="+instanceID), // FIXME
-		}, &container.HostConfig{
-			AutoRemove: true,
-			Resources: container.Resources{
-				NanoCPUs: 500000000, // 0.5 cpu cores
-				Memory:   536870912, // 512MB
-			},
-		}, networkConfig, "")
-		if err != nil {
-			util.Log.Errorf("Failed to create container: %v", err)
-			return service.ReturnError("rocks.git.internal-error")
-		}
-		util.Log.Debugf("Created docker container with ID %v", resp.ID[:16])
-		if useNetwork {
-			if err := dockerClient.NetworkConnect(dockerctx.Background(), os.Getenv("USER_NETWORK"), resp.ID, &network.EndpointSettings{}); err != nil {
-				util.Log.Warningf("Failed to attach container to public network")
-			}
-		}
-		if err := dockerClient.ContainerStart(dockerctx.Background(), resp.ID, types.ContainerStartOptions{}); err != nil {
-			util.Log.Errorf("Failed to start container: %v", err)
-			return service.ReturnError("rocks.git.internal-error")
-		}
-		util.Log.Debugf("Started container with ID %v", resp.ID[:16])
-		user = &containerInfo{
-			ticket:      ticket,
-			containerID: instanceID,
-		}
-		users[authid] = user
+	if _, err := kubernetesConnector.StartEnvironment(authid, ticket, os.Getenv("USER_IMAGE")); err != nil {
+		util.Log.Errorf("Failed to create pod: %v", err)
+		return service.ReturnError("rocks.git.internal-error")
 	}
-	if user.ticket != ticket {
-		return service.ReturnError("rocks.git.invalid-password")
-	}
-
 	return service.ReturnEmpty()
 }
 
 func getRoles(_ context.Context, args wamp.List, _, _ wamp.Dict) *client.InvokeResult {
 	authid, idok := wamp.AsString(args[1])
-	user, userok := users[authid]
-	if !idok || !userok {
+	if !idok {
 		return service.ReturnError("rocks.git.invalid-argument")
 	}
+
+	_, instance, ready, ok := kubernetesConnector.FindPodForUser(authid, nil)
+	if !ok {
+		return service.ReturnError("rocks.git.not-authorized")
+	}
+
 	return service.ReturnValue(wamp.Dict{
 		"authroles":   wamp.List{"user"},
-		"containerid": user.containerID,
+		"containerid": instance,
+		"ready":       ready,
 	})
 }

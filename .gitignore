@@ -3,3 +3,5 @@ bin
 package
 vendor
 cmanager
+.idea
+.vscode
