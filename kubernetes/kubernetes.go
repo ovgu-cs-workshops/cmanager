@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"time"
 
 	"github.com/gammazero/nexus/wamp"
 	"github.com/ovgu-cs-workshops/cmanager/util"
@@ -63,38 +64,43 @@ func (k *KubernetesConnector) WatchPVC(stop chan struct{}) error {
 		LabelSelector: "git-talk=true",
 	}
 	podNamespace := os.Getenv("POD_NAMESPACE")
-	watch, err := k.clientInstance.CoreV1().PersistentVolumeClaims(podNamespace).Watch(listOptions)
-	if err != nil {
-		return err
-	}
-	results := watch.ResultChan()
-	util.Log.Infof("Established pvc watch")
 	for {
-		select {
-		case <-stop:
-			return nil
-		case evt, ok := <-results:
-			if !ok {
-				return errors.New("Watch ended")
-			}
-			pvc, ok := evt.Object.(*v1.PersistentVolumeClaim)
-			if !ok {
-				util.Log.Errorf("Expected PVC, got %v", evt.Object)
-				continue
-			}
-			instance, ok := pvc.Annotations["git-talk-inst"]
-			if !ok {
-				util.Log.Warningf("Missing instance annotation for pvc %s", pvc.Name)
-				continue
-			}
-			util.Log.Debugf("PVC for instance %s is now %s", instance, pvc.Status.Phase)
-			if pvc.Status.Phase == "Bound" {
-				go func() {
-					// best effort
-					util.App.Client.Publish(fmt.Sprintf("rocks.git.%s.state", instance), nil, wamp.List{"pvcbound"}, nil)
-				}()
+		watch, err := k.clientInstance.CoreV1().PersistentVolumeClaims(podNamespace).Watch(listOptions)
+		if err != nil {
+			return err
+		}
+		results := watch.ResultChan()
+		util.Log.Infof("Established pvc watch")
+	inner:
+		for {
+			select {
+			case <-stop:
+				return nil
+			case evt, ok := <-results:
+				if !ok {
+					util.Log.Warningf("APIServer ended our PVC watch, establishing a new watch.")
+					break inner
+				}
+				pvc, ok := evt.Object.(*v1.PersistentVolumeClaim)
+				if !ok {
+					util.Log.Errorf("Expected PVC, got %v", evt.Object)
+					continue
+				}
+				instance, ok := pvc.Annotations["git-talk-inst"]
+				if !ok {
+					util.Log.Warningf("Missing instance annotation for pvc %s", pvc.Name)
+					continue
+				}
+				util.Log.Debugf("PVC for instance %s is now %s", instance, pvc.Status.Phase)
+				if pvc.Status.Phase == "Bound" {
+					go func() {
+						// best effort
+						util.App.Client.Publish(fmt.Sprintf("rocks.git.%s.state", instance), nil, wamp.List{"pvcbound"}, nil)
+					}()
+				}
 			}
 		}
+		time.Sleep(5 * time.Second)
 	}
 }
 
@@ -103,36 +109,40 @@ func (k *KubernetesConnector) WatchPod(stop chan struct{}) error {
 		LabelSelector: "git-talk=true",
 	}
 	podNamespace := os.Getenv("POD_NAMESPACE")
-	watch, err := k.clientInstance.CoreV1().Pods(podNamespace).Watch(listOptions)
-	if err != nil {
-		return err
-	}
-	results := watch.ResultChan()
-	util.Log.Infof("Established pod watch")
 	for {
-		select {
-		case <-stop:
-			return nil
-		case evt, ok := <-results:
-			if !ok {
-				return errors.New("Watch ended")
-			}
-			pod, ok := evt.Object.(*v1.Pod)
-			if !ok {
-				util.Log.Errorf("Expected Pod, got %v", evt.Object)
-				continue
-			}
-			instance, ok := pod.Annotations["git-talk-inst"]
-			if !ok {
-				util.Log.Warningf("Missing instance annotation for pod %s", pod.Name)
-				continue
-			}
-			util.Log.Debugf("Pod for instance %s is now %s", instance, pod.Status.Phase)
-			if pod.Status.Phase == "Running" {
-				go func() {
-					// best effort
-					util.App.Client.Publish(fmt.Sprintf("rocks.git.%s.state", instance), nil, wamp.List{"podrunning"}, nil)
-				}()
+		watch, err := k.clientInstance.CoreV1().Pods(podNamespace).Watch(listOptions)
+		if err != nil {
+			return err
+		}
+		results := watch.ResultChan()
+		util.Log.Infof("Established pod watch")
+	inner:
+		for {
+			select {
+			case <-stop:
+				return nil
+			case evt, ok := <-results:
+				if !ok {
+					util.Log.Warningf("APIServer ended our pod watch, establishing a new one")
+					break inner
+				}
+				pod, ok := evt.Object.(*v1.Pod)
+				if !ok {
+					util.Log.Errorf("Expected Pod, got %v", evt.Object)
+					continue
+				}
+				instance, ok := pod.Annotations["git-talk-inst"]
+				if !ok {
+					util.Log.Warningf("Missing instance annotation for pod %s", pod.Name)
+					continue
+				}
+				util.Log.Debugf("Pod for instance %s is now %s", instance, pod.Status.Phase)
+				if pod.Status.Phase == "Running" {
+					go func() {
+						// best effort
+						util.App.Client.Publish(fmt.Sprintf("rocks.git.%s.state", instance), nil, wamp.List{"podrunning"}, nil)
+					}()
+				}
 			}
 		}
 	}
