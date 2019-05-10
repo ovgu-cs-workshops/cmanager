@@ -223,6 +223,16 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 				{
 					Name:  "userland-" + instanceId,
 					Image: imageName,
+					Resources: v1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							"cpu":    resource.MustParse("100m"),
+							"memory": resource.MustParse("128Mi"),
+						},
+						Limits: v1.ResourceList{
+							"cpu":    resource.MustParse("200m"),
+							"memory": resource.MustParse("256Mi"),
+						},
+					},
 					Env: []v1.EnvVar{
 						{
 							Name:  "SERVICE_REALM",
