@@ -100,7 +100,7 @@ func (k *KubernetesConnector) WatchPVC(stop chan struct{}) error {
 				}
 			}
 		}
-		time.Sleep(5 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 }
 
@@ -145,6 +145,7 @@ func (k *KubernetesConnector) WatchPod(stop chan struct{}) error {
 				}
 			}
 		}
+		time.Sleep(2 * time.Second)
 	}
 }
 
