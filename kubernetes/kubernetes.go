@@ -208,6 +208,27 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 			},
 		},
 		Spec: v1.PodSpec{
+			Affinity: &v1.Affinity{
+				PodAffinity: &v1.PodAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []v1.WeightedPodAffinityTerm{
+						v1.WeightedPodAffinityTerm{
+							Weight: 1,
+							PodAffinityTerm: v1.PodAffinityTerm{
+								TopologyKey: "kubernetes.io/hostname",
+								LabelSelector: &metav1.LabelSelector{
+									MatchExpressions: []metav1.LabelSelectorRequirement{
+										metav1.LabelSelectorRequirement{
+											Key:      "git-talk-service",
+											Operator: metav1.LabelSelectorOpIn,
+											Values:   []string{"broker"},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
 			Volumes: []v1.Volume{
 				{
 					Name: "userland-" + instanceId + "-home",
