@@ -14,8 +14,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/ovgu-cs-workshops/cmanager/kubernetes"
@@ -27,7 +25,6 @@ import (
 	"github.com/ovgu-cs-workshops/cmanager/util"
 )
 
-var useNetwork bool
 var kubernetesConnector *kubernetes.KubernetesConnector
 var readyRexexp = regexp.MustCompile(`rocks\.git\.tui\.(?P<ID>[a-zA-Z0-9]+)\.create`)
 
@@ -41,29 +38,17 @@ func main() {
 	util.Log = app.Logger
 	util.App = app
 
-	if allowNet, ok := os.LookupEnv("USER_ALLOW_NETWORK"); !ok {
-		useNetwork = false
-	} else if val, err := strconv.ParseBool(allowNet); err == nil {
-		if net, ok := os.LookupEnv("USER_NETWORK"); val && (!ok || len(strings.TrimSpace(net)) == 0) {
-			util.Log.Errorf("This service requires the 'USER_NETWORK' environment variable to be set.")
-			os.Exit(service.ExitArgument)
-		}
-	} else {
-		util.Log.Errorf("Failed to parse the value of 'USER_ALLOW_NETWORK': %v", err)
-		os.Exit(service.ExitArgument)
-	}
-
 	// Trying to get access to kubernetes cluster
 	kubernetesConnector = kubernetes.New()
 
 	app.Connect()
 
 	procedures := map[string]service.HandlerRegistration{
-		"rocks.git.public.authenticate": service.HandlerRegistration{
+		"rocks.git.public.authenticate": {
 			Handler: authenticate,
 			Options: wamp.Dict{},
 		},
-		"rocks.git.public.get-roles": service.HandlerRegistration{
+		"rocks.git.public.get-roles": {
 			Handler: getRoles,
 			Options: wamp.Dict{},
 		},

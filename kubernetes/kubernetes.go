@@ -156,15 +156,15 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 	podNamespace := os.Getenv("POD_NAMESPACE")
 	storageClass := os.Getenv("POD_STORAGE_CLASS")
 
-	pod, instanceId, _, ok := k.FindPodForUser(userName, &userPassword)
-	if !ok {
-		if inst, err := util.RandomHex(4); err != nil {
-			return nil, errors.New("Failed to generate instance id.")
-		} else {
-			instanceId = inst
-		}
+	pod, _, _, ok := k.FindPodForUser(userName, &userPassword)
+	if ok {
+		return pod, nil;
+	}
+	var instanceId string
+	if inst, err := util.RandomHex(4); err != nil {
+		return nil, errors.New("failed to generate instance id")
 	} else {
-		return pod, nil
+		instanceId = inst
 	}
 
 	pvDescription := v1.PersistentVolumeClaim{
@@ -211,13 +211,13 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 			Affinity: &v1.Affinity{
 				PodAffinity: &v1.PodAffinity{
 					PreferredDuringSchedulingIgnoredDuringExecution: []v1.WeightedPodAffinityTerm{
-						v1.WeightedPodAffinityTerm{
+						{
 							Weight: 1,
 							PodAffinityTerm: v1.PodAffinityTerm{
 								TopologyKey: "kubernetes.io/hostname",
 								LabelSelector: &metav1.LabelSelector{
 									MatchExpressions: []metav1.LabelSelectorRequirement{
-										metav1.LabelSelectorRequirement{
+										{
 											Key:      "git-talk-service",
 											Operator: metav1.LabelSelectorOpIn,
 											Values:   []string{"broker"},
