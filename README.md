@@ -16,4 +16,5 @@ Additional environment variables and their meaning are described below:
 | Name | Type | Description |
 | ---- | ---- | ----------- |
 | `USER_IMAGE` | string | Docker image to use for spawned containers |
+| `RUNPRIVILEGED` | bool | Whether to spawn the containers in privileged mode |
 

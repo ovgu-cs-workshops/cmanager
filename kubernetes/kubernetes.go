@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/gammazero/nexus/wamp"
@@ -195,6 +196,15 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 	}
 	svcToken := false
 
+	privileged := false
+	if privilegedFlag, flagOk := os.LookupEnv("RUNPRIVILEGED"); flagOk {
+		if privilegedParse, err := strconv.ParseBool(privilegedFlag); err == nil {
+			privileged = privilegedParse
+		} else {
+			util.Log.Warningf("RUNPRIVILEGED was specified but unable to parse, fallback to false! %v", err)
+		}
+	}
+
 	podDescription := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "userland-" + instanceId,
@@ -253,6 +263,9 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 							"cpu":    resource.MustParse("200m"),
 							"memory": resource.MustParse("256Mi"),
 						},
+					},
+					SecurityContext: &v1.SecurityContext{
+						Privileged: &privileged,
 					},
 					Env: []v1.EnvVar{
 						{
