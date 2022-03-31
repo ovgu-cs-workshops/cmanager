@@ -20,6 +20,13 @@ import (
 
 var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9]{1,32}$`)
 
+func EnvOrDefault(envName, defaultValue string) string {
+	if v, ok := os.LookupEnv(envName); ok {
+		return v
+	}
+	return defaultValue
+}
+
 type KubernetesConnector struct {
 	clientInstance *kubernetes.Clientset
 }
@@ -256,12 +263,12 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 					Image: imageName,
 					Resources: v1.ResourceRequirements{
 						Requests: v1.ResourceList{
-							"cpu":    resource.MustParse("100m"),
-							"memory": resource.MustParse("128Mi"),
+							"cpu":    resource.MustParse(EnvOrDefault("CPU_REQUEST", "500m")),
+							"memory": resource.MustParse(EnvOrDefault("MEM_REQUEST", "512Mi")),
 						},
 						Limits: v1.ResourceList{
-							"cpu":    resource.MustParse("200m"),
-							"memory": resource.MustParse("256Mi"),
+							"cpu":    resource.MustParse(EnvOrDefault("CPU_LIMIT", "1")),
+							"memory": resource.MustParse(EnvOrDefault("MEM_LIMIT", "1Gi")),
 						},
 					},
 					SecurityContext: &v1.SecurityContext{
