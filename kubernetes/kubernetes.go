@@ -201,7 +201,12 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 	if err != nil {
 		return nil, err
 	}
-	svcToken := false
+
+	svcName, hasSvc := os.LookupEnv("SERVICE_ACCOUNT")
+	var svcAcct *string
+	if hasSvc {
+		svcAcct = &svcName
+	}
 
 	privileged := false
 	if privilegedFlag, flagOk := os.LookupEnv("RUNPRIVILEGED"); flagOk {
@@ -256,7 +261,8 @@ func (k *KubernetesConnector) StartEnvironment(userName string, userPassword str
 					},
 				},
 			},
-			AutomountServiceAccountToken: &svcToken,
+			AutomountServiceAccountToken: &hasSvc,
+			ServiceAccountName: *svcAcct,
 			Containers: []v1.Container{
 				{
 					Name:  "userland-" + instanceId,
